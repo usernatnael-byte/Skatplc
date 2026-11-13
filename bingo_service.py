@@ -43,6 +43,7 @@ def create_game(entry_price=10, created_by=None, room_name=None):
         "entry_price": price,
         "status": "waiting",
         "player_count": 0,
+        "player_names": [],
         "min_players": MIN_PLAYERS,
         "max_players": MAX_PLAYERS,
         "draw_interval_seconds": DEFAULT_DRAW_INTERVAL,
@@ -129,7 +130,10 @@ def join_game(game_id, telegram_id, username="Player"):
         }
         tx.update(user_ref, updates)
         tx.set(player_ref, player)
+        player_names = list(game.get("player_names", []))
+        player_names.append(player["username"])
         game_updates = {
+            "player_names": player_names[:MAX_PLAYERS],
             "player_count": new_count,
             "pool": float(game.get("pool", 0)) + price,
             "updated_at": now(),
@@ -151,14 +155,13 @@ def get_game(game_id, telegram_id=None):
     data["id"] = snap.id
     data["called_numbers"] = data.get("called_numbers", [])
 
-    players = []
-    for player_snap in ref.collection("players").stream():
-        player = player_snap.to_dict() or {}
-        players.append({
-            "username": player.get("username", "Player"),
-            "is_you": str(player.get("telegram_id", player_snap.id)) == str(telegram_id),
-        })
-    data["players"] = players
+    player_names = data.get("player_names")
+    if player_names is None:
+        player_names = [
+            (player_snap.to_dict() or {}).get("username", "Player")
+            for player_snap in ref.collection("players").stream()
+        ]
+    data["players"] = [{"username": name} for name in player_names]
 
     if telegram_id is not None:
         player_snap = ref.collection("players").document(str(telegram_id)).get()
