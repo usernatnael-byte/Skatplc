@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Payout Audit Trail</title>
+    <style>
+        body { font-family: Arial; padding: 20px; }
+        table { width: 100%; border-collapse: collapse; margin-top: 20px; }
+        th, td { border: 1px solid #ccc; padding: 8px; }
+        th { background-color: #eee; }
+    </style>
+</head>
+<body>
+    <h1>🧾 Payout Audit Trail</h1>
+    <table>
+        <tr>
+            <th>User</th>
+            <th>Amount</th>
+            <th>Approved By</th>
+            <th>Note</th>
+            <th>Time</th>
+        </tr>
+        {% for tx in approved_tx %}
+        <tr>
+            <td>@{{ tx.user.username }}</td>
+            <td>{{ tx.amount }} birr</td>
+            <td>{{ tx.approved_by }}</td>
+            <td>{{ tx.approval_note }}</td>
+            <td>{{ tx.completed_at }}</td>
+        </tr>
+        {% endfor %}
+    </table>
+</body>
+</html>

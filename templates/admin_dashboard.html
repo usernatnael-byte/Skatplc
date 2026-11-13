@@ -1,0 +1,133 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Admin Dashboard – Efona Bingo Ethiopia</title>
+  <style>
+    body { font-family: Arial, sans-serif; padding: 20px; background-color: #f9f9f9; }
+    h1, h2, h3 { margin-top: 40px; }
+    table { width: 100%; border-collapse: collapse; margin-bottom: 30px; background-color: #fff; }
+    th, td { border: 1px solid #ccc; padding: 8px; text-align: left; }
+    th { background-color: #eee; }
+    button { padding: 6px 12px; background-color: #28a745; color: white; border: none; cursor: pointer; }
+    button:hover { background-color: #218838; }
+    .section { margin-bottom: 50px; }
+    .note { font-size: 14px; color: #555; margin-bottom: 10px; }
+  </style>
+</head>
+<body>
+
+  <h1>🎛️ Admin Dashboard – Efona Bingo Ethiopia</h1>
+
+  <!-- 💰 Pending Deposits -->
+  <div class="section">
+    <h2>💰 Pending Deposits</h2>
+    <div class="note">Players send to: CBE Birr 0920927761, Telebirr 0920927761, or CBE Bank 1000316113347</div>
+    <table>
+      <tr>
+        <th>User</th>
+        <th>Amount</th>
+        <th>Reference</th>
+        <th>Method</th>
+        <th>Action</th>
+      </tr>
+      {% for tx in pending_deposits %}
+      <tr>
+        <td>@{{ tx.user.username }}</td>
+        <td>{{ tx.amount }} birr</td>
+        <td>{{ tx.reference }}</td>
+        <td>{{ tx.method }}</td>
+        <td>
+          <form method="POST" action="{{ url_for('admin.approve_deposit') }}">
+            <input type="hidden" name="user_id" value="{{ tx.user_id }}">
+            <input type="hidden" name="tx_id" value="{{ tx.id }}">
+            <input type="hidden" name="amount" value="{{ tx.amount }}">
+            <button type="submit">✅ Confirm</button>
+          </form>
+        </td>
+      </tr>
+      {% endfor %}
+    </table>
+  </div>
+
+  <!-- 💸 Pending Withdrawals -->
+  <div class="section">
+    <h2>💸 Pending Withdrawals</h2>
+    <div class="note">Payouts go to: CBE Birr 0920927761, Telebirr 0920927761, or CBE Bank 1000316113347</div>
+    <table>
+      <tr>
+        <th>User</th>
+        <th>Amount</th>
+        <th>Approval Note</th>
+        <th>Action</th>
+      </tr>
+      {% for tx in pending_withdrawals %}
+      <tr>
+        <td>@{{ tx.user.username }}</td>
+        <td>{{ tx.amount }} birr</td>
+        <td>
+          <form method="POST" action="{{ url_for('admin.approve_withdrawal') }}">
+            <input type="hidden" name="user_id" value="{{ tx.user_id }}">
+            <input type="hidden" name="tx_id" value="{{ tx.id }}">
+            <input type="hidden" name="amount" value="{{ tx.amount }}">
+            <input type="text" name="note" placeholder="e.g. phone confirmed">
+            <button type="submit">✅ Approve</button>
+          </form>
+        </td>
+        <td></td>
+      </tr>
+      {% endfor %}
+    </table>
+  </div>
+
+  <!-- 🎮 Recent Games -->
+  <div class="section">
+    <h2>🎮 Recent Games</h2>
+    <table>
+      <tr>
+        <th>ID</th>
+        <th>Status</th>
+        <th>Created At</th>
+        <th>Action</th>
+      </tr>
+      {% for game in games %}
+      <tr>
+        <td>{{ game.id }}</td>
+        <td>{{ game.status }}</td>
+        <td>{{ game.created_at }}</td>
+        <td>
+          {% if game.status == "waiting" %}
+          <form method="POST" action="{{ url_for('admin.start_game') }}">
+            <input type="hidden" name="game_id" value="{{ game.id }}">
+            <button type="submit">▶️ Start</button>
+          </form>
+          {% else %}
+          —
+          {% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+    </table>
+  </div>
+
+  <!-- 👥 Recent Players -->
+  <div class="section">
+    <h2>👥 Recent Players</h2>
+    <table>
+      <tr>
+        <th>Username</th>
+        <th>Balance</th>
+        <th>Joined</th>
+      </tr>
+      {% for player in players %}
+      <tr>
+        <td>@{{ player.username }}</td>
+        <td>{{ player.balance }} birr</td>
+        <td>{{ player.created_at }}</td>
+      </tr>
+      {% endfor %}
+    </table>
+  </div>
+
+</body>
+</html>

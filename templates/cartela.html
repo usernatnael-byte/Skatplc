@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Cartela Bingo</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/cartela.css') }}">
+</head>
+<body>
+  <header>
+    <h1>🎯 Cartela Bingo</h1>
+    <div id="game-info">
+      <p>Game ID: <span id="game-id">{{ game_id }}</span></p>
+      <p>Stake: <span id="stake">{{ entry_price }} ETB</span></p>
+      <p>Players: <span id="players">{{ player_count }}</span></p>
+      <p>Derash: <span id="derash">{{ pool }} ETB</span></p>
+      <p>🔊 Sound: {{ 'On' if sound_enabled else 'Muted' }}</p>
+      <p>🎮 Mode: {{ play_mode.capitalize() }}</p>
+    </div>
+  </header>
+
+  <div id="win-banner" style="display:none; background:#28a745; color:white; padding:10px; text-align:center;">
+    🎉 You won! Congratulations!
+  </div>
+
+  <section id="bonus-grid">
+    <h2>Bonus Numbers</h2>
+    <div class="grid" id="bonus-numbers"></div>
+  </section>
+
+  <section id="cartela-section">
+    <h2>Your Cartela</h2>
+    <div class="cartela-grid" id="cartela"></div>
+  </section>
+
+  <section id="controls">
+    <button id="refresh">🔄 Refresh</button>
+    <button id="add-cartela">➕ Add Cartela</button>
+    <button id="bingo">🎉 BINGO</button>
+  </section>
+
+  <div id="loading" style="display:none; text-align:center;">
+    <p>⏳ Loading...</p>
+  </div>
+
+  <footer>
+    <p>© Efona Bingo Ethiopia 2025</p>
+  </footer>
+
+  <script>
+    const telegramId = new URLSearchParams(window.location.search).get("id");
+    const cartelaGrid = document.getElementById("cartela");
+    const bonusGrid = document.getElementById("bonus-numbers");
+    const winBanner = document.getElementById("win-banner");
+
+    async function loadCartela() {
+      document.getElementById("loading").style.display = "block";
+      const res = await fetch(`/api/cartela?id=${telegramId}`);
+      const data = await res.json();
+      renderCartela(data.cartela);
+      renderBonus(data.bonus || []);
+      if (data.winner === telegramId) {
+        winBanner.style.display = "block";
+      }
+      document.getElementById("loading").style.display = "none";
+    }
+
+    function renderCartela(numbers) {
+      cartelaGrid.innerHTML = "";
+      numbers.forEach(n => {
+        const div = document.createElement("div");
+        div.className = "number selected";
+        div.textContent = n;
+        cartelaGrid.appendChild(div);
+      });
+    }
+
+    function renderBonus(numbers) {
+      bonusGrid.innerHTML = "";
+      numbers.forEach(n => {
+        const div = document.createElement("div");
+        div.className = "number bonus";
+        div.textContent = n;
+        bonusGrid.appendChild(div);
+      });
+    }
+
+    document.getElementById("refresh").onclick = loadCartela;
+
+    document.getElementById("add-cartela").onclick = async () => {
+      const input = prompt("Enter 5 numbers between 1–90, separated by commas:");
+      if (!input) return;
+      const nums = input.split(",").map(n => parseInt(n.trim())).filter(n => n >= 1 && n <= 90);
+      if (nums.length !== 5) {
+        alert("❌ Invalid input. Please enter exactly 5 numbers.");
+        return;
+      }
+      await fetch(`/api/cartela?id=${telegramId}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ cartela: nums })
+      });
+      alert("✅ Cartela updated!");
+      loadCartela();
+    };
+
+    document.getElementById("bingo").onclick = () => {
+      alert("🎉 Bingo submitted! Waiting for result...");
+    };
+
+    loadCartela();
+  </script>
+</body>
+</html>

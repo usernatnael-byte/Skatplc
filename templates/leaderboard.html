@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Efona Bingo Leaderboard</title>
+    <style>
+        body { font-family: Arial, sans-serif; padding: 20px; }
+        h2 { margin-top: 40px; }
+        table { width: 100%; border-collapse: collapse; margin-bottom: 30px; }
+        th, td { border: 1px solid #ccc; padding: 8px; text-align: left; }
+        th { background-color: #f2f2f2; }
+    </style>
+</head>
+<body>
+
+    <h1>🏆 Efona Bingo Ethiopia Leaderboard</h1>
+
+    <h2>Top Winners</h2>
+    <table>
+        <tr><th>Username</th><th>Games Won</th></tr>
+        {% for user in top_winners %}
+        <tr><td>@{{ user.username }}</td><td>{{ user.games_won }}</td></tr>
+        {% endfor %}
+    </table>
+
+    <h2>Most Active Players</h2>
+    <table>
+        <tr><th>Username</th><th>Games Played</th></tr>
+        {% for user in most_active %}
+        <tr><td>@{{ user.username }}</td><td>{{ user.games_played }}</td></tr>
+        {% endfor %}
+    </table>
+
+    <h2>Richest Players</h2>
+    <table>
+        <tr><th>Username</th><th>Balance</th></tr>
+        {% for user in richest %}
+        <tr><td>@{{ user.username }}</td><td>{{ user.balance }} birr</td></tr>
+        {% endfor %}
+    </table>
+
+</body>
+</html>

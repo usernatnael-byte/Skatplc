@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Referral Leaderboard</title>
+    <style>
+        body { font-family: Arial, sans-serif; padding: 20px; }
+        h1 { margin-bottom: 30px; }
+        table { width: 100%; border-collapse: collapse; margin-bottom: 30px; }
+        th, td { border: 1px solid #ccc; padding: 8px; text-align: left; }
+        th { background-color: #f2f2f2; }
+        ul { margin: 0; padding-left: 20px; }
+    </style>
+</head>
+<body>
+
+    <h1>🎁 Referral Leaderboard</h1>
+
+    <table>
+        <tr>
+            <th>Username</th>
+            <th>Referrals</th>
+            <th>Bonus Earned</th>
+            <th>Invited Users</th>
+        </tr>
+        {% for row in referral_data %}
+        <tr>
+            <td>@{{ row.username }}</td>
+            <td>{{ row.count }}</td>
+            <td>{{ row.bonus }} birr</td>
+            <td>
+                <ul>
+                    {% for name in row.invited %}
+                    <li>@{{ name }}</li>
+                    {% endfor %}
+                </ul>
+            </td>
+        </tr>
+        {% endfor %}
+    </table>
+
+</body>
+</html>
