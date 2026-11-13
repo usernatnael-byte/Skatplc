@@ -137,9 +137,12 @@ def withdraw():
     user = get_user(telegram_id)
     if not user or float(user.get("balance", 0)) < amount:
         return jsonify({"error": "Insufficient balance"}), 400
-    tx = create_transaction(telegram_id, "withdraw", amount,
-                            withdrawal_phone=str(data.get("phone", ""))[:30])
-    return jsonify({"message": "Withdrawal request submitted", "status": "pending", "transaction_id": tx["id"]}), 202
+    try:
+        tx = create_transaction(telegram_id, "withdraw", amount,
+                                withdrawal_phone=str(data.get("phone", ""))[:30])
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+    return jsonify({"message": "Withdrawal request submitted; funds are reserved pending review", "status": "pending", "transaction_id": tx["id"]}), 202
 
 
 @app.get("/admin/transactions")
