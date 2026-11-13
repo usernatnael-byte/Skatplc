@@ -111,7 +111,8 @@ def main():
     application.add_handler(CommandHandler("adminstats", admin_stats))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
     log.info("Starting Telegram polling worker")
-    application.run_polling(drop_pending_updates=True)
+    # This app runs inside a daemon thread on the single Render web instance.
+    application.run_polling(drop_pending_updates=True, stop_signals=None)
 
 
 if __name__ == "__main__":
