@@ -79,9 +79,13 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if action == "deposit" and amount < 30:
         await update.message.reply_text("Minimum deposit is 30 ETB.")
         return
-    create_transaction(user_id, action, amount, **extra)
+    try:
+        create_transaction(user_id, action, amount, **extra)
+    except (ValueError, LookupError) as exc:
+        await update.message.reply_text(str(exc))
+        return
     context.user_data.pop("pending_action", None)
-    await update.message.reply_text("Request submitted. It will remain pending until an administrator reviews it.")
+    await update.message.reply_text("Request submitted. Withdrawal funds are reserved; an administrator will review it.")
 
 
 async def admin_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
