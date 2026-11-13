@@ -1,306 +1,118 @@
-import os
-import asyncio
+"""Telegram polling worker using the same Cloud Firestore database as app.py."""
 import logging
-import threading
-from telegram import (
-    Update, InlineKeyboardButton, InlineKeyboardMarkup,
-    InputFile, WebAppInfo
-)
-from telegram.ext import (
-    Application, CommandHandler, MessageHandler, CallbackQueryHandler,
-    ContextTypes, filters
-)
-from models import db, User, Game, GameParticipant, Transaction, ScheduledGame
-from utils import get_lang, referral_link, is_valid_tx_id
-from sqlalchemy import func
-from config import WEBAPP_URL, ADMIN_IDS, TELEGRAM_BOT_TOKEN
-import game
+import os
 
-# The web application and bot share one SQLAlchemy instance and schema.
-from app import app as flask_app
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, WebAppInfo
+from telegram.ext import Application, CommandHandler, MessageHandler, ContextTypes, filters
 
-# ------------------------------------------------------
-# Logging setup
-# ------------------------------------------------------
+from config import WEBAPP_URL, ADMIN_IDS
+from models import create_user, get_user, create_transaction, db
+
 logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+log = logging.getLogger("efona-bingo")
 
-# ------------------------------------------------------
-# Telegram bot setup
-# ------------------------------------------------------
-BOT_TOKEN = os.getenv("BOT_TOKEN") or TELEGRAM_BOT_TOKEN
-if not BOT_TOKEN:
-    raise RuntimeError("Set BOT_TOKEN (or TELEGRAM_BOT_TOKEN) in the environment")
 
-telegram_app = Application.builder().token(BOT_TOKEN).build()
-
-# ------------------------------------------------------
-# COMMAND HANDLERS
-# ------------------------------------------------------
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    telegram_id = str(update.effective_user.id)
-    username = update.effective_user.username or "unknown"
-    with flask_app.app_context():
-        user = User.query.filter_by(telegram_id=telegram_id).first()
-        if not user:
-            user = User(telegram_id=telegram_id, username=username, balance=0)
-            db.session.add(user)
-            db.session.commit()
-    lang = get_lang(context)
-    await update.message.reply_text(lang["welcome"])
+    tg = update.effective_user
+    create_user(tg.id, tg.username or "unknown")
+    if context.args and context.args[0].isdigit():
+        referrer = context.args[0]
+        if referrer != str(tg.id):
+            db.collection("users").document(str(tg.id)).set({"referred_by": referrer}, merge=True)
+    keyboard = [[InlineKeyboardButton("🎮 Play Bingo", web_app=WebAppInfo(url=WEBAPP_URL))],
+                [InlineKeyboardButton("💰 Balance", callback_data="balance")]]
+    await update.message.reply_text(
+        "እንኳን ወደ Efona Bingo በደህና መጡ!\nWelcome to Efona Bingo!",
+        reply_markup=InlineKeyboardMarkup(keyboard))
 
-async def deposit(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    lang = get_lang(context)
-    context.chat_data["deposit_method"] = "cbe_birr"
-    await update.message.reply_text(lang["deposit"])
-
-async def withdraw(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    lang = get_lang(context)
-    await update.message.reply_text(lang["withdraw"])
 
 async def balance(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    telegram_id = str(update.effective_user.id)
-    user = User.query.filter_by(telegram_id=telegram_id).first()
-    if user:
-        lang = get_lang(context)
-        await update.message.reply_text(f"{lang['balance']}: {user.balance} birr")
-    else:
-        await update.message.reply_text("❌ You must start the bot first using /start.")
+    user = get_user(update.effective_user.id)
+    amount = float((user or {}).get("balance", 0))
+    await update.message.reply_text(f"💰 Your balance: {amount:.2f} ETB")
 
-async def referral_contest(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    lang = get_lang(context)
-    telegram_id = str(update.effective_user.id)
-    link = referral_link(telegram_id)
-    await update.message.reply_text(f"{lang['referral_contest']}:\n{link}")
 
-async def invite(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    telegram_id = str(update.effective_user.id)
-    lang = get_lang(context)
-    link = referral_link(telegram_id)
-    await update.message.reply_text(f"{lang['invite']}: {link}")
+async def deposit(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    context.user_data["pending_action"] = "deposit"
+    await update.message.reply_text("Send deposit amount and transaction reference separated by a comma. Example: 100, ABC12345")
+
+
+async def withdraw(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    context.user_data["pending_action"] = "withdraw"
+    await update.message.reply_text("Send withdrawal amount and phone number separated by a comma. Example: 100, 09XXXXXXXX")
+
 
 async def language(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(
-        "🌐 Choose your language:",
-        reply_markup=InlineKeyboardMarkup([
-            [InlineKeyboardButton("🇬🇧 English", callback_data="toggle_lang:en")],
-            [InlineKeyboardButton("🇪🇹 አማርኛ", callback_data="toggle_lang:am")]
-        ])
-    )
+    await update.message.reply_text("Language setting will be available soon. /start to open the game.")
 
-async def play_game(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    telegram_id = update.effective_user.id
-    lang = get_lang(context)
-    await update.message.reply_text(
-        f"{lang['play']}...",
-        reply_markup=InlineKeyboardMarkup([
-            [InlineKeyboardButton("🧩 Open Game WebApp", web_app=WebAppInfo(url=f"{WEBAPP_URL}?id={telegram_id}"))]
-        ])
-    )
-    game.start_game(chat_id=update.effective_chat.id, context=context)
 
-async def call_number(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    result = game.call_number(chat_id=update.effective_chat.id, context=context)
-    if result:
-        await context.bot.send_message(chat_id=update.effective_chat.id, text=f"🎱 {result['formatted']}")
-        try:
-            await context.bot.send_voice(chat_id=update.effective_chat.id, voice=InputFile("audio/number_call_am.ogg"))
-        except Exception:
-            pass
-    else:
-        await context.bot.send_message(chat_id=update.effective_chat.id, text="✅ Game finished!")
+async def play(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    url = f"{WEBAPP_URL}?tgWebAppStartParam={user_id}"
+    await update.message.reply_text("Open the Bingo game:", reply_markup=InlineKeyboardMarkup(
+        [[InlineKeyboardButton("🎮 Open Bingo", web_app=WebAppInfo(url=url))]]))
 
-async def leaderboard(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    lang = get_lang(context)
-    lb = game.get_leaderboard()
-    if not lb:
-        await update.message.reply_text(f"{lang['leaderboard']}: No winners yet.")
+
+async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    action = context.user_data.get("pending_action")
+    if not action:
+        await update.message.reply_text("Use /start, /balance, /deposit, /withdraw or /play.")
         return
-    lines = [lang["leaderboard"]]
-    medals = ["🥇", "🥈", "🥉"]
-    for i, (uid, wins, earnings) in enumerate(lb):
-        user = User.query.get(uid)
-        medal = medals[i] if i < 3 else "🔹"
-        lines.append(f"{medal} @{user.username} – {wins} wins, {earnings} birr")
-    await update.message.reply_text("\n".join(lines))
-
-async def summary(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    lang = get_lang(context)
-    s = game.summary(update.effective_chat.id)
-    lines = [
-        f"{lang['summary']}:",
-        f"Game #{s['game_id']}",
-        f"Status: {s['status']}",
-        f"Players: {s['players']}",
-        f"Pool: {s['pool']} birr",
-        f"Called Numbers: {s['called']}",
-        f"Winner: @{User.query.get(s['winner']).username}" if s['winner'] else "Winner: —",
-        f"Admin Earnings: {s['admin_earnings']} birr"
-    ]
-    await update.message.reply_text("\n".join(lines))
-
-async def mycartela(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    telegram_id = str(update.effective_user.id)
-    user = User.query.filter_by(telegram_id=telegram_id).first()
-    summary = game.get_player_summary(user.id)
-    if not summary:
-        await update.message.reply_text("🧩 You have no active cartelas.")
+    parts = [p.strip() for p in update.message.text.split(",", 1)]
+    try:
+        amount = float(parts[0])
+        if amount <= 0:
+            raise ValueError
+    except (ValueError, IndexError):
+        await update.message.reply_text("Invalid amount. Try again, e.g. 100, reference/phone.")
         return
-    lines = ["🧩 Your Cartelas:"]
-    for c in summary:
-        lines.append(f"Cartela #{c['cartela_number']}: marked {len(c['marked'])} numbers")
-        lines.append(f"🔢 {sorted(c['marked'])}")
-    await update.message.reply_text("\n".join(lines))
-
-async def mygames(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    telegram_id = str(update.effective_user.id)
-    user = User.query.filter_by(telegram_id=telegram_id).first()
-    games = GameParticipant.query.filter_by(user_id=user.id).order_by(GameParticipant.id.desc()).limit(5).all()
-    lines = ["📜 Your Recent Games:"]
-    for g in games:
-        lines.append(f"Game #{g.game_id} – Cartela #{g.cartela_number} – Marked: {len(g.marked_numbers)}")
-    await update.message.reply_text("\n".join(lines))
-
-async def referrals(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    telegram_id = str(update.effective_user.id)
-    user = User.query.filter_by(telegram_id=telegram_id).first()
-    active_refs = [u for u in user.referred_users if u.games_played > 0]
-    link = referral_link(telegram_id)
-    lang = get_lang(context)
-    await update.message.reply_text(f"{lang['referrals']}: {len(active_refs)} active\nLink: {link}")
-
-async def toggle_sound(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    telegram_id = str(update.effective_user.id)
-    user = User.query.filter_by(telegram_id=telegram_id).first()
-    user.sound_enabled = not user.sound_enabled
-    db.session.commit()
-    lang = get_lang(context)
-    status = lang["toggle_sound"] + (" ✅ ON" if user.sound_enabled else " ❌ OFF")
-    await update.message.reply_text(status)
-
-async def report_bug(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    lang = get_lang(context)
-    await update.message.reply_text(lang["report_bug"])
-
-async def schedule_game(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.effective_user.id not in ADMIN_IDS:
-        await update.message.reply_text("❌ Only admins can schedule games.")
+    user_id = str(update.effective_user.id)
+    user = get_user(user_id)
+    if not user:
+        await update.message.reply_text("Please use /start first.")
         return
-    sg = ScheduledGame(entry_price=10.0, status="pending")
-    db.session.add(sg)
-    db.session.commit()
-    lang = get_lang(context)
-    await update.message.reply_text(f"{lang['schedule_game']}: Game #{sg.id} created.")
-
-async def admin_broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.effective_user.id not in ADMIN_IDS:
-        await update.message.reply_text("❌ Only admins can broadcast.")
+    if action == "withdraw" and float(user.get("balance", 0)) < amount:
+        await update.message.reply_text("Insufficient balance.")
         return
-    message = " ".join(context.args)
-    users = User.query.all()
-    for u in users:
-        try:
-            await context.bot.send_message(chat_id=int(u.telegram_id), text=message)
-        except Exception:
-            continue
-    lang = get_lang(context)
-    await update.message.reply_text(f"{lang['broadcast']}: Sent.")
+    extra = {"reference": parts[1][:100]} if action == "deposit" and len(parts) > 1 else {}
+    if action == "withdraw":
+        extra = {"withdrawal_phone": parts[1][:30]} if len(parts) > 1 else {}
+    if action == "deposit" and amount < 30:
+        await update.message.reply_text("Minimum deposit is 30 ETB.")
+        return
+    create_transaction(user_id, action, amount, **extra)
+    context.user_data.pop("pending_action", None)
+    await update.message.reply_text("Request submitted. It will remain pending until an administrator reviews it.")
+
 
 async def admin_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    total_users = User.query.count()
-    total_games = Game.query.count()
-    total_balance = db.session.query(func.sum(User.balance)).scalar() or 0
-    lang = get_lang(context)
-    await update.message.reply_text(
-        f"{lang['adminstats']}:\nUsers: {total_users}\nGames: {total_games}\nTotal Balance: {total_balance} birr"
-    )
-
-async def cartela_preview(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    lang = get_lang(context)
-    await update.message.reply_text(f"{lang['cartela_preview']}: Coming soon.")
-
-# ------------------------------------------------------
-# Message input + error handling
-# ------------------------------------------------------
-async def handle_user_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not update.effective_user or not update.message:
+    if update.effective_user.id not in ADMIN_IDS:
+        await update.message.reply_text("Not authorized.")
         return
-    telegram_id = str(update.effective_user.id)
-    text = update.message.text.strip()
+    users = list(db.collection("users").stream())
+    games = list(db.collection("games").stream())
+    total = sum(float(x.to_dict().get("balance", 0)) for x in users)
+    await update.message.reply_text(f"Users: {len(users)}\nGames: {len(games)}\nTotal balance: {total:.2f} ETB")
 
-    with flask_app.app_context():
-        user = User.query.filter_by(telegram_id=telegram_id).first()
-        if not user:
-            await update.message.reply_text("❌ You must start the bot first using /start.")
-            return
 
-        if text.startswith("edit:"):
-            user.cartela = text.replace("edit:", "").strip()
-            db.session.commit()
-            await update.message.reply_text("✅ Cartela updated.")
-            return
-
-        if "deposit_method" in context.chat_data:
-            method = context.chat_data["deposit_method"]
-            if not is_valid_tx_id(text):
-                await update.message.reply_text("❌ Invalid transaction ID. Please try again.")
-                return
-            tx = Transaction(user_id=user.id, type="deposit", amount=0,
-                             method=method, status="pending", reference=text)
-            db.session.add(tx)
-            db.session.commit()
-            await update.message.reply_text("✅ Transaction received. Awaiting admin approval.")
-            return
-
-        try:
-            amount = int(text)
-            if amount <= 0 or amount > user.balance:
-                await update.message.reply_text("❌ Invalid amount or insufficient balance.")
-                return
-            tx = Transaction(user_id=user.id, type="withdraw", amount=amount, status="pending")
-            db.session.add(tx)
-            db.session.commit()
-            await update.message.reply_text(f"✅ Withdrawal request for {amount} birr submitted.")
-        except ValueError:
-            await update.message.reply_text("❌ Please enter a valid number.")
-
-async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE):
-    logger.error("Exception while handling an update:", exc_info=context.error)
-    if isinstance(update, Update) and update.message:
-        await update.message.reply_text("⚠️ Something went wrong. Please try again.")
-
-# ------------------------------------------------------
-# Startup: run as a dedicated Render Background Worker (polling mode).
-# ------------------------------------------------------
-def register_handlers():
-    telegram_app.add_handler(CommandHandler("start", start))
-    telegram_app.add_handler(CommandHandler("deposit", deposit))
-    telegram_app.add_handler(CommandHandler("withdraw", withdraw))
-    telegram_app.add_handler(CommandHandler("balance", balance))
-    telegram_app.add_handler(CommandHandler("referral_contest", referral_contest))
-    telegram_app.add_handler(CommandHandler("invite", invite))
-    telegram_app.add_handler(CommandHandler("language", language))
-    telegram_app.add_handler(CommandHandler("play", play_game))
-    telegram_app.add_handler(CommandHandler("call", call_number))
-    telegram_app.add_handler(CommandHandler("leaderboard", leaderboard))
-    telegram_app.add_handler(CommandHandler("summary", summary))
-    telegram_app.add_handler(CommandHandler("mycartela", mycartela))
-    telegram_app.add_handler(CommandHandler("mygames", mygames))
-    telegram_app.add_handler(CommandHandler("referrals", referrals))
-    telegram_app.add_handler(CommandHandler("toggle_sound", toggle_sound))
-    telegram_app.add_handler(CommandHandler("report_bug", report_bug))
-    telegram_app.add_handler(CommandHandler("schedule_game", schedule_game))
-    telegram_app.add_handler(CommandHandler("broadcast", admin_broadcast))
-    telegram_app.add_handler(CommandHandler("adminstats", admin_stats))
-    telegram_app.add_handler(CommandHandler("cartela_preview", cartela_preview))
-    telegram_app.add_handler(CallbackQueryHandler(language, pattern="toggle_lang"))
-    telegram_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_user_input))
-    telegram_app.add_error_handler(error_handler)
+def main():
+    token = os.getenv("BOT_TOKEN") or os.getenv("TELEGRAM_BOT_TOKEN")
+    if not token:
+        raise RuntimeError("Set BOT_TOKEN in Render environment variables.")
+    if not WEBAPP_URL.startswith("https://"):
+        raise RuntimeError("WEBAPP_URL must be the public HTTPS URL of the deployed web app.")
+    application = Application.builder().token(token).build()
+    application.add_handler(CommandHandler("start", start))
+    application.add_handler(CommandHandler("balance", balance))
+    application.add_handler(CommandHandler("deposit", deposit))
+    application.add_handler(CommandHandler("withdraw", withdraw))
+    application.add_handler(CommandHandler("play", play))
+    application.add_handler(CommandHandler("language", language))
+    application.add_handler(CommandHandler("adminstats", admin_stats))
+    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
+    log.info("Starting Telegram polling worker")
+    application.run_polling(drop_pending_updates=True)
 
 
 if __name__ == "__main__":
-    logging.info("Starting Efona Bingo Telegram polling worker")
-    register_handlers()
-    # Keep the Flask application context active for SQLAlchemy in handlers.
-    with flask_app.app_context():
-        telegram_app.run_polling(drop_pending_updates=True)
+    main()
