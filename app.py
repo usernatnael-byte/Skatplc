@@ -11,7 +11,7 @@ from flask import Flask, jsonify, render_template, request, redirect, url_for, s
 
 from database import db
 from models import create_user, get_user, create_transaction, process_transaction
-from bingo_service import create_game, list_games, join_game, get_game, call_next_number, claim_bingo
+from bingo_service import create_game, list_games, join_game, get_game, call_next_number, claim_bingo, make_board, _has_bingo
 
 app = Flask(__name__)
 app.secret_key = os.getenv("EFONA_FLASK_SECRET") or os.getenv("EFONA_SECRET_KEY")
@@ -66,7 +66,7 @@ def health():
 
 @app.get("/cartela")
 def cartela_page():
-    return render_template("cartela.html", game_id="—", entry_price=10,
+    return render_template("index.html", game_id="—", entry_price=10,
                            player_count=0, pool=0, sound_enabled=True,
                            play_mode="manual")
 
@@ -226,7 +226,7 @@ def _current_telegram_user():
 
 @app.get("/lobby")
 def game_lobby():
-    return render_template("cartela.html", game_id="—", entry_price=10,
+    return render_template("index.html", game_id="—", entry_price=10,
                            player_count=0, pool=0, sound_enabled=True, play_mode="manual")
 
 @app.get("/api/games")
@@ -361,3 +361,191 @@ def admin_call_game(game_id):
         return redirect(url_for("admin_dashboard"))
     except (LookupError, ValueError) as exc:
         return jsonify({"error": str(exc)}), 409
+
+# --- No-stakes multiplayer demo rooms ---------------------------------------
+# Demo rooms use anonymous, signed Flask sessions and never touch user balances,
+# deposits, withdrawals, or prize accounting.
+def _demo_identity():
+    from uuid import uuid4
+    player_id = session.get("efona_demo_player_id")
+    if not player_id:
+        player_id = uuid4().hex
+        session["efona_demo_player_id"] = player_id
+    return player_id
+
+
+@app.get("/api/demo/rooms")
+def api_demo_rooms():
+    try:
+        docs = db.collection("demo_rooms").order_by("created_at", direction="DESCENDING").limit(30).stream()
+        rooms = []
+        for snap in docs:
+            item = snap.to_dict() or {}
+            if item.get("status") in ("waiting", "active"):
+                rooms.append({"id": snap.id, "status": item.get("status"),
+                              "players": item.get("player_count", 0),
+                              "current_number": item.get("current_number"),
+                              "created_at": item.get("created_at")})
+        return jsonify(rooms)
+    except Exception:
+        app.logger.exception("Could not list demo rooms")
+        return jsonify({"error": "Demo rooms are temporarily unavailable"}), 503
+
+
+@app.post("/api/demo/rooms")
+def api_create_demo_room():
+    from uuid import uuid4
+    player_id = _demo_identity()
+    payload = request.get_json(silent=True) or {}
+    display_name = str(payload.get("display_name") or "Guest").strip()[:24] or "Guest"
+    room_ref = db.collection("demo_rooms").document()
+    room = {"id": room_ref.id, "status": "active", "demo": True,
+            "host_id": player_id, "player_count": 1, "called_numbers": [],
+            "current_number": None, "winner_id": None, "created_at": time.time(),
+            "updated_at": time.time()}
+    room_ref.set(room)
+    room_ref.collection("players").document(player_id).set({
+        "player_id": player_id, "display_name": display_name,
+        "board": make_board(), "joined_at": time.time(), "claimed": False
+    })
+    return jsonify({"room_id": room_ref.id, "room": room}), 201
+
+
+@app.post("/api/demo/rooms/<room_id>/join")
+def api_join_demo_room(room_id):
+    player_id = _demo_identity()
+    payload = request.get_json(silent=True) or {}
+    display_name = str(payload.get("display_name") or "Guest").strip()[:24] or "Guest"
+    room_ref = db.collection("demo_rooms").document(str(room_id))
+    player_ref = room_ref.collection("players").document(player_id)
+    tx = db.transaction()
+
+    @transactional
+    def apply(t):
+        room_snap = room_ref.get(transaction=t)
+        player_snap = player_ref.get(transaction=t)
+        if not room_snap.exists:
+            raise LookupError("Demo room not found")
+        room = room_snap.to_dict()
+        if room.get("status") != "active":
+            raise ValueError("This demo room is no longer accepting players")
+        if player_snap.exists:
+            return player_snap.to_dict()
+        if int(room.get("player_count", 0)) >= 100:
+            raise ValueError("This demo room is full")
+        player = {"player_id": player_id, "display_name": display_name,
+                  "board": make_board(), "joined_at": time.time(), "claimed": False}
+        t.set(player_ref, player)
+        t.update(room_ref, {"player_count": int(room.get("player_count", 0)) + 1,
+                            "updated_at": time.time()})
+        return player
+
+    try:
+        player = apply(tx)
+        return jsonify({"message": "Joined demo room", "board": player["board"]})
+    except LookupError as exc:
+        return jsonify({"error": str(exc)}), 404
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 409
+    except Exception:
+        app.logger.exception("Demo room join failed")
+        return jsonify({"error": "Could not join demo room"}), 503
+
+
+@app.get("/api/demo/rooms/<room_id>")
+def api_demo_room_status(room_id):
+    player_id = _demo_identity()
+    room_ref = db.collection("demo_rooms").document(str(room_id))
+    snap = room_ref.get()
+    if not snap.exists:
+        return jsonify({"error": "Demo room not found"}), 404
+    room = snap.to_dict()
+    player_snap = room_ref.collection("players").document(player_id).get()
+    if not player_snap.exists:
+        return jsonify({"error": "Join this demo room first"}), 403
+    players = []
+    for p in room_ref.collection("players").stream():
+        pdata = p.to_dict() or {}
+        players.append({"display_name": pdata.get("display_name", "Guest"),
+                        "is_host": p.id == room.get("host_id")})
+    return jsonify({**room, "id": snap.id, "player": player_snap.to_dict(),
+                    "players": players, "is_host": player_id == room.get("host_id")})
+
+
+@app.post("/api/demo/rooms/<room_id>/draw")
+def api_draw_demo_number(room_id):
+    player_id = _demo_identity()
+    room_ref = db.collection("demo_rooms").document(str(room_id))
+    tx = db.transaction()
+
+    @transactional
+    def apply(t):
+        snap = room_ref.get(transaction=t)
+        if not snap.exists:
+            raise LookupError("Demo room not found")
+        room = snap.to_dict()
+        if room.get("host_id") != player_id:
+            raise PermissionError("Only the room host can start the live draw")
+        if room.get("status") != "active":
+            raise ValueError("This demo room is not active")
+        called = list(room.get("called_numbers", []))
+        available = [n for n in range(1, 76) if n not in called]
+        if not available:
+            t.update(room_ref, {"status": "finished", "updated_at": time.time()})
+            return None
+        number = random.choice(available)
+        called.append(number)
+        t.update(room_ref, {"called_numbers": called, "current_number": number,
+                            "last_draw_at": time.time(), "updated_at": time.time()})
+        return number
+
+    try:
+        number = apply(tx)
+        return jsonify({"number": number, "room": api_demo_room_status(room_id).get_json()})
+    except LookupError as exc:
+        return jsonify({"error": str(exc)}), 404
+    except PermissionError as exc:
+        return jsonify({"error": str(exc)}), 403
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 409
+    except Exception:
+        app.logger.exception("Demo number draw failed")
+        return jsonify({"error": "Could not draw the next number"}), 503
+
+
+@app.post("/api/demo/rooms/<room_id>/claim")
+def api_claim_demo_bingo(room_id):
+    player_id = _demo_identity()
+    room_ref = db.collection("demo_rooms").document(str(room_id))
+    player_ref = room_ref.collection("players").document(player_id)
+    tx = db.transaction()
+
+    @transactional
+    def apply(t):
+        room_snap = room_ref.get(transaction=t)
+        player_snap = player_ref.get(transaction=t)
+        if not room_snap.exists or not player_snap.exists:
+            raise LookupError("Demo room or player not found")
+        room, player = room_snap.to_dict(), player_snap.to_dict()
+        if room.get("status") != "active":
+            raise ValueError("This demo room is not active")
+        if room.get("winner_id"):
+            raise ValueError("A winner has already been confirmed")
+        if not _has_bingo(player.get("board", []), room.get("called_numbers", [])):
+            raise ValueError("Your Bingo pattern is not complete yet")
+        t.update(room_ref, {"status": "finished", "winner_id": player_id,
+                            "winner_name": player.get("display_name", "Guest"),
+                            "finished_at": time.time(), "updated_at": time.time()})
+        t.update(player_ref, {"claimed": True})
+        return {"winner": player_id, "winner_name": player.get("display_name", "Guest"),
+                "demo": True, "prize": 0}
+
+    try:
+        return jsonify({"message": "Demo Bingo verified!", **apply(tx)})
+    except LookupError as exc:
+        return jsonify({"error": str(exc)}), 404
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 409
+    except Exception:
+        app.logger.exception("Demo Bingo claim failed")
+        return jsonify({"error": "Could not verify demo Bingo"}), 503
