@@ -19,8 +19,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         referrer = context.args[0]
         if referrer != str(tg.id):
             db.collection("users").document(str(tg.id)).set({"referred_by": referrer}, merge=True)
-    keyboard = [[InlineKeyboardButton("🎮 Play Bingo", web_app=WebAppInfo(url=WEBAPP_URL))],
-                [InlineKeyboardButton("💰 Balance", callback_data="balance")]]
+    keyboard = [[InlineKeyboardButton("🎮 Play Bingo", web_app=WebAppInfo(url=WEBAPP_URL))]]
     await update.message.reply_text(
         "እንኳን ወደ Efona Bingo በደህና መጡ!\nWelcome to Efona Bingo!",
         reply_markup=InlineKeyboardMarkup(keyboard))
