@@ -5,6 +5,7 @@ import json
 import os
 import random
 import time
+import threading
 from urllib.parse import parse_qsl
 
 from flask import Flask, jsonify, render_template, request, redirect, url_for, session
@@ -14,9 +15,7 @@ from models import create_user, get_user, create_transaction, process_transactio
 from bingo_service import create_game, list_games, join_game, get_game, call_next_number, claim_bingo
 
 app = Flask(__name__)
-app.secret_key = os.getenv("EFONA_FLASK_SECRET") or os.getenv("EFONA_SECRET_KEY")
-if not app.secret_key:
-    app.secret_key = "development-only-change-this"
+app.secret_key = os.getenv("EFONA_FLASK_SECRET") or os.getenv("EFONA_SECRET_KEY") or os.urandom(32)
 
 
 def _telegram_user():
@@ -60,15 +59,18 @@ def _new_cartela():
 
 
 @app.get("/")
+def home_page():
+    return render_template("index.html")
+
+
+@app.get("/healthz")
 def health():
     return jsonify({"service": "Efona Bingo", "status": "online", "database": "cloud_firestore"}), 200
 
 
 @app.get("/cartela")
 def cartela_page():
-    return render_template("cartela.html", game_id="—", entry_price=10,
-                           player_count=0, pool=0, sound_enabled=True,
-                           play_mode="manual")
+    return redirect(url_for("home_page"))
 
 
 @app.route("/api/cartela", methods=["GET", "POST"])
@@ -226,8 +228,7 @@ def _current_telegram_user():
 
 @app.get("/lobby")
 def game_lobby():
-    return render_template("cartela.html", game_id="—", entry_price=10,
-                           player_count=0, pool=0, sound_enabled=True, play_mode="manual")
+    return redirect(url_for("home_page"))
 
 @app.get("/api/games")
 def api_list_games():
@@ -244,7 +245,7 @@ def api_create_game():
         return jsonify({"error": "Open the game from Telegram."}), 401
     data = request.get_json(silent=True) or {}
     try:
-        game = create_game(data.get("entry_price", 10), user.get("id"))
+        game = create_game(data.get("entry_price", 10), user.get("id"), data.get("room_name"))
         return jsonify({"game_id": game["id"], "game": game}), 201
     except ValueError as exc:
         return jsonify({"error": str(exc)}), 400
@@ -287,7 +288,7 @@ def api_call_number(game_id):
     if not _admin_authorized():
         return jsonify({"error": "Admin authorization required"}), 401
     try:
-        number = call_next_number(game_id)
+        number = call_next_number(game_id, force=True)
         return jsonify({"number": number, "game": get_game(game_id)})
     except LookupError as exc:
         return jsonify({"error": str(exc)}), 404
@@ -361,3 +362,20 @@ def admin_call_game(game_id):
         return redirect(url_for("admin_dashboard"))
     except (LookupError, ValueError) as exc:
         return jsonify({"error": str(exc)}), 409
+
+
+# One scheduler process drives every active real-player room. Render is configured
+# with a single Gunicorn worker so this loop cannot be duplicated across workers.
+def _run_game_engine():
+    while True:
+        try:
+            for room in list_games(limit=50):
+                if room.get("status") == "active":
+                    call_next_number(room["id"])
+        except Exception:
+            app.logger.exception("Automatic Bingo draw loop failed")
+        time.sleep(1)
+
+
+if os.getenv("EFONA_RUN_GAME_ENGINE", "true").lower() == "true":
+    threading.Thread(target=_run_game_engine, name="efona-game-engine", daemon=True).start()
