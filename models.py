@@ -1,14 +1,8 @@
-"""Firestore-backed data helpers shared by the web app and Telegram bot.
-
-Document layout:
-  users/{telegram_id}
-  transactions/{transaction_id}
-  games/{game_id}
-  cartelas/{telegram_id}
-"""
+"""Firestore-backed data helpers shared by the web app and Telegram bot."""
 from datetime import datetime, timezone
 from uuid import uuid4
 
+from google.cloud.firestore_v1.transaction import transactional
 from database import db
 
 
@@ -55,17 +49,12 @@ def create_transaction(telegram_id, tx_type, amount, **fields):
     return {"id": tx_id, **data}
 
 
-def get_transaction(tx_id):
-    snap = db.collection("transactions").document(str(tx_id)).get()
-    return {"id": snap.id, **snap.to_dict()} if snap.exists else None
-
-
 def process_transaction(tx_id, approve):
-    """Approve/reject once; balance changes atomically with transaction status."""
+    """Approve/reject exactly once and update the balance atomically."""
     ref = db.collection("transactions").document(str(tx_id))
     transaction = db.transaction()
 
-    @__import__("firebase_admin").firestore.transactional
+    @transactional
     def apply(tx):
         snap = ref.get(transaction=tx)
         if not snap.exists:
@@ -83,7 +72,8 @@ def process_transaction(tx_id, approve):
             if data.get("type") == "withdraw" and float(user.get("balance", 0)) < amount:
                 raise ValueError("Insufficient balance")
             delta = amount if data.get("type") == "deposit" else -amount
-            tx.update(user_ref, {"balance": float(user.get("balance", 0)) + delta, "updated_at": utc_now()})
+            tx.update(user_ref, {"balance": float(user.get("balance", 0)) + delta,
+                                 "updated_at": utc_now()})
             status = "approved"
         else:
             status = "rejected"
