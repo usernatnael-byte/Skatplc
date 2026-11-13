@@ -383,5 +383,5 @@ def _run_game_engine():
         time.sleep(1)
 
 
-if os.getenv("EFONA_RUN_GAME_ENGINE", "true").lower() == "true":
+if os.getenv("EFONA_RUN_GAME_ENGINE", "false").lower() == "true":
     threading.Thread(target=_run_game_engine, name="efona-game-engine", daemon=True).start()
