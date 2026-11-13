@@ -14,7 +14,7 @@ from models import create_user, get_user, create_transaction, process_transactio
 from bingo_service import create_game, list_games, join_game, get_game, call_next_number, claim_bingo
 
 app = Flask(__name__)
-app.secret_key = os.getenv("FLASK_SECRET") or os.getenv("SECRET_KEY")
+app.secret_key = os.getenv("EFONA_FLASK_SECRET") or os.getenv("EFONA_SECRET_KEY")
 if not app.secret_key:
     app.secret_key = "development-only-change-this"
 
@@ -22,7 +22,7 @@ if not app.secret_key:
 def _telegram_user():
     """Validate Telegram WebApp initData; never trust a query-string user id."""
     init_data = request.headers.get("X-Telegram-Init-Data", "")
-    token = os.getenv("BOT_TOKEN") or os.getenv("TELEGRAM_BOT_TOKEN")
+    token = os.getenv("EFONA_BOT_TOKEN") or os.getenv("EFONA_TELEGRAM_BOT_TOKEN")
     if not init_data or not token:
         return None
     values = dict(parse_qsl(init_data, keep_blank_values=True))
@@ -47,7 +47,7 @@ def _telegram_user():
 def _admin_authorized():
     if session.get("admin_authenticated") is True:
         return True
-    expected = os.getenv("ADMIN_API_TOKEN")
+    expected = os.getenv("EFONA_ADMIN_API_TOKEN")
     supplied = request.headers.get("X-Admin-Token", "")
     return bool(expected and hmac.compare_digest(expected, supplied))
 
@@ -197,7 +197,7 @@ def leaderboard():
 
 # Render's free web instance cannot host a separate free Background Worker.
 # Run the Telegram polling loop in a single daemon thread in this same service.
-if os.getenv("RUN_TELEGRAM_BOT", "").lower() == "true":
+if os.getenv("EFONA_RUN_TELEGRAM_BOT", "").lower() == "true":
     import threading
 
     def _run_bot():
