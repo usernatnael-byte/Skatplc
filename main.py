@@ -1,61 +1,72 @@
-import os
-import asyncio
-from app import app
-from bot import main as bot_main
-from multiprocessing import Process
-import signal
-import sys
+from fastapi import FastAPI, HTTPException
+from database import db
+from models import ItemModel
 
-def signal_handler(sig, frame):
-    print('Shutting down gracefully...')
-    sys.exit(0)
+app = FastAPI(title="FastAPI Firebase Firestore Render App")
 
-def run_flask():
-    # Use gunicorn configuration
-    from gunicorn.app.base import BaseApplication
+@app.get("/")
+def read_root():
+    return {"message": "አፕሊኬሽኑ በ Firebase Firestore እና በ Render ላይ በትክክል እየሰራ ነው!"}
 
-    class FlaskApplication(BaseApplication):
-        def __init__(self, app, options=None):
-            self.options = options or {}
-            self.application = app
-            super().__init__()
-
-        def load_config(self):
-            for key, value in self.options.items():
-                self.cfg.set(key.lower(), value)
-
-        def load(self):
-            return self.application
-
-    options = {
-        'bind': '0.0.0.0:5000',
-        'workers': 1,
-        'reload': True
-    }
-    FlaskApplication(app, options).run()
-
-def run_bot():
-    asyncio.run(bot_main())
-
-if __name__ == "__main__":
-    # Register signal handler
-    signal.signal(signal.SIGINT, signal_handler)
-    signal.signal(signal.SIGTERM, signal_handler)
-
-    # Start Flask in a separate process
-    flask_process = Process(target=run_flask)
-    flask_process.start()
-
+# 1. መረጃ መመዝገብ (Create Item)
+@app.post("/items/")
+def create_item(item: ItemModel):
     try:
-        # Run the bot in the main process
-        run_bot()
-    except KeyboardInterrupt:
-        print("Received keyboard interrupt, shutting down...")
+        # 'items' የሚባል ኮሌክሽን ውስጥ መረጃውን እናስገባለን
+        doc_ref = db.collection("items").document()
+        item_dict = item.dict()
+        doc_ref.set(item_dict)
+        
+        return {
+            "status": "success",
+            "id": doc_ref.id,
+            "data": item_dict
+        }
     except Exception as e:
-        print(f"Error: {e}")
-    finally:
-        # Cleanup
-        if flask_process.is_alive():
-            flask_process.terminate()
-            flask_process.join()
-        sys.exit(0)
+        raise HTTPException(status_code=500, detail=str(e))
+
+# 2. ሁሉንም መረጃዎች ማንበብ (Get All Items)
+@app.get("/items/")
+def get_items():
+    try:
+        items_ref = db.collection("items")
+        docs = items_ref.stream()
+        
+        items_list = []
+        for doc in docs:
+            item_data = doc.to_dict()
+            item_data["id"] = doc.id
+            items_list.append(item_data)
+            
+        return items_list
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+# 3. አንድን መረጃ በ ID ፈልጎ ማምጣት (Get Item by ID)
+@app.get("/items/{item_id}")
+def get_item(item_id: str):
+    try:
+        doc_ref = db.collection("items").document(item_id)
+        doc = doc_ref.get()
+        
+        if not doc.exists:
+            raise HTTPException(status_code=404, detail="መረጃው አልተገኘም (Item not found)")
+            
+        item_data = doc.to_dict()
+        item_data["id"] = doc.id
+        return item_data
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+# 4. መረጃን ማጥፋት (Delete Item)
+@app.delete("/items/{item_id}")
+def delete_item(item_id: str):
+    try:
+        doc_ref = db.collection("items").document(item_id)
+        if not doc_ref.get().exists:
+            raise HTTPException(status_code=404, detail="መረጃው አልተገኘም")
+            
+        doc_ref.delete()
+        return {"status": "success", "message": f"የዕቃ ቁጥር {item_id} ሰርቷል/ጠፍቷል"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
