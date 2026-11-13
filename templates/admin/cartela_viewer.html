@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html data-bs-theme="dark">
+<head>
+    <meta charset="UTF-8">
+    <title>Cartela Viewer – Efona Bingo Ethiopia</title>
+    <link rel="stylesheet" href="https://cdn.replit.com/agent/bootstrap-agent-dark-theme.min.css">
+    <style>
+        .cartela-grid {
+            display: grid;
+            grid-template-columns: repeat(10, 1fr);
+            gap: 4px;
+            margin-top: 10px;
+        }
+        .cell {
+            padding: 6px;
+            text-align: center;
+            border: 1px solid #555;
+            border-radius: 4px;
+            font-weight: bold;
+            position: relative;
+        }
+        .marked {
+            background-color: #28a745;
+            color: white;
+        }
+        .unmarked {
+            background-color: #222;
+            color: #ccc;
+        }
+        .audio-btn {
+            position: absolute;
+            bottom: 2px;
+            right: 2px;
+            font-size: 12px;
+            padding: 2px 6px;
+            background-color: #444;
+            color: #fff;
+            border: none;
+            border-radius: 3px;
+            cursor: pointer;
+        }
+        .audio-btn:hover {
+            background-color: #666;
+        }
+    </style>
+</head>
+<body>
+    <div class="container mt-4">
+        <h2>🧾 Cartela Viewer</h2>
+        <p>Game ID: {{ game.id }} | Player: {{ participant.user.username or participant.user.telegram_id }} | Mode: {{ participant.mode }}</p>
+        <p>Cartela #: {{ participant.cartela_number }} | Count: {{ participant.cartela_count }}</p>
+
+        <div class="cartela-grid">
+            {% for number in participant.board %}
+                {% if number in participant.marked %}
+                    <div class="cell marked">
+                        {{ number }}
+                        <button class="audio-btn" onclick="playAudio('{{ number }}')">🔊</button>
+                    </div>
+                {% else %}
+                    <div class="cell unmarked">
+                        {{ number }}
+                        <button class="audio-btn" onclick="playAudio('{{ number }}')">🔊</button>
+                    </div>
+                {% endif %}
+            {% endfor %}
+        </div>
+
+        <br>
+        <a href="{{ url_for('dashboard') }}" class="btn btn-secondary">⬅️ Back to Dashboard</a>
+    </div>
+
+    <script>
+        function playAudio(number) {
+            const audio = new Audio(`/static/audio/${number}.mp3`);
+            audio.play();
+        }
+    </script>
+</body>
+</html>
