@@ -211,7 +211,7 @@ if os.getenv("EFONA_RUN_TELEGRAM_BOT", "").lower() == "true":
 
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=int(os.getenv("PORT", os.getenv("FLASK_PORT", 5000))))
+    app.run(host="0.0.0.0", port=int(os.getenv("PORT", os.getenv("EFONA_FLASK_PORT", 5000))))
 
 
 def _current_telegram_user():
@@ -317,7 +317,7 @@ def api_claim_bingo(game_id):
 def admin_dashboard():
     if request.method == "POST":
         supplied = request.form.get("admin_token", "")
-        expected = os.getenv("ADMIN_API_TOKEN", "")
+        expected = os.getenv("EFONA_ADMIN_API_TOKEN", "")
         if expected and hmac.compare_digest(expected, supplied):
             session["admin_authenticated"] = True
             return redirect(url_for("admin_dashboard"))
