@@ -321,20 +321,20 @@ def admin_dashboard():
         if expected and hmac.compare_digest(expected, supplied):
             session["admin_authenticated"] = True
             return redirect(url_for("admin_dashboard"))
-        return render_template("admin_dashboard.html", login=True, login_error="Invalid admin token"), 401
+        return render_template("admin.html", login=True, login_error="Invalid admin token"), 401
     if not _admin_authorized():
-        return render_template("admin_dashboard.html", login=True)
+        return render_template("admin.html", login=True)
     try:
         users = list(db.collection("users").order_by("created_at", direction="DESCENDING").limit(100).stream())
         transactions = list(db.collection("transactions").order_by("created_at", direction="DESCENDING").limit(100).stream())
         games = list(db.collection("games").order_by("created_at", direction="DESCENDING").limit(50).stream())
-        return render_template("admin_dashboard.html", login=False,
+        return render_template("admin.html", login=False,
             users=[{"id":d.id, **(d.to_dict() or {})} for d in users],
             transactions=[{"id":d.id, **(d.to_dict() or {})} for d in transactions],
             games=[{"id":d.id, **(d.to_dict() or {})} for d in games])
     except Exception:
         app.logger.exception("Admin dashboard failed")
-        return render_template("admin_dashboard.html", login=False,
+        return render_template("admin.html", login=False,
                                load_error="Firestore data could not be loaded"), 503
 
 @app.post("/admin/logout")
