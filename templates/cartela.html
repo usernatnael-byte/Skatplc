@@ -1,113 +1,88 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Cartela Bingo</title>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Efona Bingo Cartela</title>
   <link rel="stylesheet" href="{{ url_for('static', filename='css/cartela.css') }}">
+  <script src="https://telegram.org/js/telegram-web-app.js"></script>
 </head>
 <body>
   <header>
-    <h1>🎯 Cartela Bingo</h1>
-    <div id="game-info">
-      <p>Game ID: <span id="game-id">{{ game_id }}</span></p>
-      <p>Stake: <span id="stake">{{ entry_price }} ETB</span></p>
-      <p>Players: <span id="players">{{ player_count }}</span></p>
-      <p>Derash: <span id="derash">{{ pool }} ETB</span></p>
-      <p>🔊 Sound: {{ 'On' if sound_enabled else 'Muted' }}</p>
-      <p>🎮 Mode: {{ play_mode.capitalize() }}</p>
-    </div>
+    <h1>🎯 Efona Bingo</h1>
+    <p>Game ID: <span id="game-id">{{ game_id }}</span> · Entry: {{ entry_price }} ETB</p>
   </header>
-
-  <div id="win-banner" style="display:none; background:#28a745; color:white; padding:10px; text-align:center;">
-    🎉 You won! Congratulations!
-  </div>
-
-  <section id="bonus-grid">
-    <h2>Bonus Numbers</h2>
-    <div class="grid" id="bonus-numbers"></div>
-  </section>
-
-  <section id="cartela-section">
+  <div id="error" role="alert" style="color:#b00020"></div>
+  <div id="loading">Loading your cartela…</div>
+  <section>
     <h2>Your Cartela</h2>
     <div class="cartela-grid" id="cartela"></div>
   </section>
-
-  <section id="controls">
-    <button id="refresh">🔄 Refresh</button>
-    <button id="add-cartela">➕ Add Cartela</button>
-    <button id="bingo">🎉 BINGO</button>
+  <section>
+    <h2>Called numbers</h2>
+    <div class="grid" id="bonus-numbers"></div>
   </section>
-
-  <div id="loading" style="display:none; text-align:center;">
-    <p>⏳ Loading...</p>
-  </div>
-
-  <footer>
-    <p>© Efona Bingo Ethiopia 2025</p>
-  </footer>
-
+  <div id="win-banner" style="display:none">🎉 Bingo!</div>
+  <section id="controls">
+    <button id="refresh" type="button">↻ Refresh cartela</button>
+    <button id="add-cartela" type="button">＋ Generate new cartela</button>
+  </section>
   <script>
-    const telegramId = new URLSearchParams(window.location.search).get("id");
-    const cartelaGrid = document.getElementById("cartela");
-    const bonusGrid = document.getElementById("bonus-numbers");
-    const winBanner = document.getElementById("win-banner");
+    const tg = window.Telegram && window.Telegram.WebApp;
+    if (tg) tg.ready();
+    const initData = tg ? tg.initData : "";
+    const headers = {"Content-Type":"application/json","X-Telegram-Init-Data":initData};
+    const grid = document.getElementById("cartela");
+    const loading = document.getElementById("loading");
+    const errorBox = document.getElementById("error");
 
+    function render(numbers) {
+      grid.innerHTML = "";
+      numbers.forEach((n, i) => {
+        const cell = document.createElement("div");
+        cell.className = "number selected";
+        cell.textContent = n;
+        grid.appendChild(cell);
+      });
+    }
+    function newBoard() {
+      const ranges = [[1,15],[16,30],[31,45],[46,60],[61,75]];
+      const cols = ranges.map(([min,max]) => {
+        const values = [];
+        while (values.length < 5) {
+          const n = Math.floor(Math.random() * (max-min+1)) + min;
+          if (!values.includes(n)) values.push(n);
+        }
+        return values;
+      });
+      return Array.from({length:5}, (_, row) => cols.flatMap(col => col[row]));
+    }
     async function loadCartela() {
-      document.getElementById("loading").style.display = "block";
-      const res = await fetch(`/api/cartela?id=${telegramId}`);
-      const data = await res.json();
-      renderCartela(data.cartela);
-      renderBonus(data.bonus || []);
-      if (data.winner === telegramId) {
-        winBanner.style.display = "block";
+      loading.style.display = "block";
+      errorBox.textContent = "";
+      try {
+        const res = await fetch("/api/cartela", {headers});
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || "Unable to load cartela");
+        render(data.cartela);
+      } catch (err) {
+        errorBox.textContent = err.message + ". Open this page from the Telegram bot.";
+      } finally {
+        loading.style.display = "none";
       }
-      document.getElementById("loading").style.display = "none";
     }
-
-    function renderCartela(numbers) {
-      cartelaGrid.innerHTML = "";
-      numbers.forEach(n => {
-        const div = document.createElement("div");
-        div.className = "number selected";
-        div.textContent = n;
-        cartelaGrid.appendChild(div);
-      });
-    }
-
-    function renderBonus(numbers) {
-      bonusGrid.innerHTML = "";
-      numbers.forEach(n => {
-        const div = document.createElement("div");
-        div.className = "number bonus";
-        div.textContent = n;
-        bonusGrid.appendChild(div);
-      });
-    }
-
     document.getElementById("refresh").onclick = loadCartela;
-
     document.getElementById("add-cartela").onclick = async () => {
-      const input = prompt("Enter 5 numbers between 1–90, separated by commas:");
-      if (!input) return;
-      const nums = input.split(",").map(n => parseInt(n.trim())).filter(n => n >= 1 && n <= 90);
-      if (nums.length !== 5) {
-        alert("❌ Invalid input. Please enter exactly 5 numbers.");
-        return;
-      }
-      await fetch(`/api/cartela?id=${telegramId}`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ cartela: nums })
-      });
-      alert("✅ Cartela updated!");
-      loadCartela();
+      try {
+        const res = await fetch("/api/cartela", {
+          method:"POST", headers,
+          body:JSON.stringify({cartela:newBoard()})
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || "Unable to save cartela");
+        render(data.cartela);
+      } catch (err) { errorBox.textContent = err.message; }
     };
-
-    document.getElementById("bingo").onclick = () => {
-      alert("🎉 Bingo submitted! Waiting for result...");
-    };
-
     loadCartela();
   </script>
 </body>
