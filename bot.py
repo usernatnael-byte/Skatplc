@@ -99,9 +99,9 @@ async def admin_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 def main():
-    token = os.getenv("BOT_TOKEN") or os.getenv("TELEGRAM_BOT_TOKEN")
+    token = os.getenv("EFONA_BOT_TOKEN") or os.getenv("EFONA_TELEGRAM_BOT_TOKEN")
     if not token:
-        raise RuntimeError("Set BOT_TOKEN in Render environment variables.")
+        raise RuntimeError("Set EFONA_BOT_TOKEN in Render environment variables.")
     if not WEBAPP_URL.startswith("https://"):
         raise RuntimeError("WEBAPP_URL must be the public HTTPS URL of the deployed web app.")
     application = Application.builder().token(token).build()
