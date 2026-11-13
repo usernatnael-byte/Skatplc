@@ -245,7 +245,13 @@ def api_create_game():
         return jsonify({"error": "Open the game from Telegram."}), 401
     data = request.get_json(silent=True) or {}
     try:
-        game = create_game(data.get("entry_price", 10), user.get("id"), data.get("room_name"))
+        entry_price = int(data.get("entry_price", 10))
+        account = get_user(user.get("id"))
+        if not account:
+            return jsonify({"error": "Start the Efona Telegram bot first."}), 404
+        if float(account.get("balance", 0)) < entry_price:
+            return jsonify({"error": "Insufficient balance to open this room. Deposit and wait for approval."}), 400
+        game = create_game(entry_price, user.get("id"), data.get("room_name"))
         return jsonify({"game_id": game["id"], "game": game}), 201
     except ValueError as exc:
         return jsonify({"error": str(exc)}), 400
@@ -358,7 +364,7 @@ def admin_call_game(game_id):
     if not _admin_authorized():
         return jsonify({"error": "Unauthorized"}), 401
     try:
-        call_next_number(game_id)
+        call_next_number(game_id, force=True)
         return redirect(url_for("admin_dashboard"))
     except (LookupError, ValueError) as exc:
         return jsonify({"error": str(exc)}), 409
