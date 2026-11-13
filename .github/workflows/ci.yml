@@ -16,7 +16,9 @@ jobs:
           python-version: "3.11"
       - run: python -m pip install --upgrade pip
       - run: pip install -r requirements.txt
-      - run: python -m compileall -q app.py bot.py database.py firebase_service.py models.py config.py
+      - run: python -m compileall -q app.py bot.py database.py firebase_service.py models.py config.py bingo_service.py
+      - name: Bingo rule tests
+        run: python -m unittest discover -s tests -v
       - name: Flask health smoke test
         run: |
           python - <<'PY'
