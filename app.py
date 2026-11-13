@@ -7,10 +7,11 @@ import random
 import time
 from urllib.parse import parse_qsl
 
-from flask import Flask, jsonify, render_template, request
+from flask import Flask, jsonify, render_template, request, redirect, url_for, session
 
 from database import db
 from models import create_user, get_user, create_transaction, process_transaction
+from bingo_service import create_game, list_games, join_game, get_game, call_next_number, claim_bingo
 
 app = Flask(__name__)
 app.secret_key = os.getenv("FLASK_SECRET") or os.getenv("SECRET_KEY")
@@ -44,6 +45,8 @@ def _telegram_user():
 
 
 def _admin_authorized():
+    if session.get("admin_authenticated") is True:
+        return True
     expected = os.getenv("ADMIN_API_TOKEN")
     supplied = request.headers.get("X-Admin-Token", "")
     return bool(expected and hmac.compare_digest(expected, supplied))
@@ -206,3 +209,152 @@ if os.getenv("RUN_TELEGRAM_BOT", "").lower() == "true":
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=int(os.getenv("PORT", os.getenv("FLASK_PORT", 5000))))
+
+
+def _current_telegram_user():
+    telegram_id = _telegram_user()
+    if not telegram_id:
+        return None
+    values = dict(parse_qsl(request.headers.get("X-Telegram-Init-Data", ""), keep_blank_values=True))
+    try:
+        return json.loads(values["user"])
+    except (KeyError, ValueError, TypeError):
+        return None
+
+@app.get("/lobby")
+def game_lobby():
+    return render_template("cartela.html", game_id="—", entry_price=10,
+                           player_count=0, pool=0, sound_enabled=True, play_mode="manual")
+
+@app.get("/api/games")
+def api_list_games():
+    try:
+        return jsonify(list_games())
+    except Exception:
+        app.logger.exception("Could not list games")
+        return jsonify({"error": "Unable to load games"}), 503
+
+@app.post("/api/games")
+def api_create_game():
+    user = _current_telegram_user()
+    if not user:
+        return jsonify({"error": "Open the game from Telegram."}), 401
+    data = request.get_json(silent=True) or {}
+    try:
+        game = create_game(data.get("entry_price", 10), user.get("id"))
+        return jsonify({"game_id": game["id"], "game": game}), 201
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+    except Exception:
+        app.logger.exception("Game creation failed")
+        return jsonify({"error": "Could not create game"}), 503
+
+@app.post("/api/games/<game_id>/join")
+def api_join_game(game_id):
+    user = _current_telegram_user()
+    if not user:
+        return jsonify({"error": "Open the game from Telegram."}), 401
+    try:
+        player = join_game(game_id, user["id"], user.get("username") or "unknown")
+        return jsonify({"message": "Joined game", "board": player["board"]}), 200
+    except LookupError as exc:
+        return jsonify({"error": str(exc)}), 404
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 409
+    except Exception:
+        app.logger.exception("Join game failed")
+        return jsonify({"error": "Could not join game"}), 503
+
+@app.get("/api/games/<game_id>")
+def api_game_status(game_id):
+    user = _current_telegram_user()
+    if not user:
+        return jsonify({"error": "Open the game from Telegram."}), 401
+    try:
+        game = get_game(game_id, user["id"])
+        if not game:
+            return jsonify({"error": "Game not found"}), 404
+        return jsonify(game)
+    except Exception:
+        app.logger.exception("Game status failed")
+        return jsonify({"error": "Could not load game"}), 503
+
+@app.post("/api/games/<game_id>/call")
+def api_call_number(game_id):
+    if not _admin_authorized():
+        return jsonify({"error": "Admin authorization required"}), 401
+    try:
+        number = call_next_number(game_id)
+        return jsonify({"number": number, "game": get_game(game_id)})
+    except LookupError as exc:
+        return jsonify({"error": str(exc)}), 404
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 409
+    except Exception:
+        app.logger.exception("Call number failed")
+        return jsonify({"error": "Could not call number"}), 503
+
+@app.post("/api/games/<game_id>/claim")
+def api_claim_bingo(game_id):
+    user = _current_telegram_user()
+    if not user:
+        return jsonify({"error": "Open the game from Telegram."}), 401
+    try:
+        result = claim_bingo(game_id, user["id"])
+        return jsonify({"message": "Bingo confirmed!", **result})
+    except LookupError as exc:
+        return jsonify({"error": str(exc)}), 404
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 409
+    except Exception:
+        app.logger.exception("Bingo claim failed")
+        return jsonify({"error": "Could not verify Bingo"}), 503
+
+@app.route("/admin", methods=["GET", "POST"])
+def admin_dashboard():
+    if request.method == "POST":
+        supplied = request.form.get("admin_token", "")
+        expected = os.getenv("ADMIN_API_TOKEN", "")
+        if expected and hmac.compare_digest(expected, supplied):
+            session["admin_authenticated"] = True
+            return redirect(url_for("admin_dashboard"))
+        return render_template("admin_dashboard.html", login=True, login_error="Invalid admin token"), 401
+    if not _admin_authorized():
+        return render_template("admin_dashboard.html", login=True)
+    try:
+        users = list(db.collection("users").order_by("created_at", direction="DESCENDING").limit(100).stream())
+        transactions = list(db.collection("transactions").order_by("created_at", direction="DESCENDING").limit(100).stream())
+        games = list(db.collection("games").order_by("created_at", direction="DESCENDING").limit(50).stream())
+        return render_template("admin_dashboard.html", login=False,
+            users=[{"id":d.id, **(d.to_dict() or {})} for d in users],
+            transactions=[{"id":d.id, **(d.to_dict() or {})} for d in transactions],
+            games=[{"id":d.id, **(d.to_dict() or {})} for d in games])
+    except Exception:
+        app.logger.exception("Admin dashboard failed")
+        return render_template("admin_dashboard.html", login=False,
+                               load_error="Firestore data could not be loaded"), 503
+
+@app.post("/admin/logout")
+def admin_logout():
+    session.clear()
+    return redirect(url_for("admin_dashboard"))
+
+@app.post("/admin/games/create")
+def admin_create_game():
+    if not _admin_authorized():
+        return jsonify({"error": "Unauthorized"}), 401
+    try:
+        create_game(request.form.get("entry_price", 10), "admin")
+        return redirect(url_for("admin_dashboard"))
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+
+@app.post("/admin/games/<game_id>/call")
+def admin_call_game(game_id):
+    if not _admin_authorized():
+        return jsonify({"error": "Unauthorized"}), 401
+    try:
+        call_next_number(game_id)
+        return redirect(url_for("admin_dashboard"))
+    except (LookupError, ValueError) as exc:
+        return jsonify({"error": str(exc)}), 409
