@@ -22,7 +22,7 @@ This branch is being migrated from mixed SQLAlchemy/Firebase code to a single Cl
 - cartelas/{telegram_id}
 - games/{game_id} with a nested players/{telegram_id} subcollection
 
-The Firebase service-account key must never be committed. Set FIREBASE_CREDENTIALS_JSON to the full service-account JSON in the hosting provider's secret environment settings.
+The Firebase service-account key must never be committed. Set EFONA_FIREBASE_CREDENTIALS_JSON to the full service-account JSON in the hosting provider's secret environment settings.
 
 ## Render setup
 
@@ -32,13 +32,13 @@ Set these environment variables in Render:
 
 | Variable | Required value |
 |---|---|
-| FIREBASE_CREDENTIALS_JSON | Full Firebase service-account JSON (secret) |
-| BOT_TOKEN | Telegram bot token from BotFather (secret) |
-| WEBAPP_URL | The deployed HTTPS URL ending in /cartela |
-| ADMIN_IDS | Comma-separated Telegram numeric admin IDs |
-| ADMIN_API_TOKEN | Generate a long random token (secret; Render YAML generates one) |
-| FLASK_SECRET | Render-generated secret (Render YAML generates one) |
-| RUN_TELEGRAM_BOT | true (Render YAML sets this) |
+| EFONA_FIREBASE_CREDENTIALS_JSON | Full Firebase service-account JSON (secret) |
+| EFONA_BOT_TOKEN | Telegram bot token from BotFather (secret) |
+| EFONA_WEBAPP_URL | The deployed HTTPS URL ending in /cartela |
+| EFONA_ADMIN_IDS | Comma-separated Telegram numeric admin IDs |
+| EFONA_ADMIN_API_TOKEN | Generate a long random token (secret; Render YAML generates one) |
+| EFONA_FLASK_SECRET | Render-generated secret (Render YAML generates one) |
+| EFONA_RUN_TELEGRAM_BOT | true (Render YAML sets this) |
 
 Build command: pip install -r requirements.txt
 
@@ -55,10 +55,10 @@ Start command: gunicorn app:app --workers 1 --threads 4 --timeout 120
 - GET /api/games/{id} — return game state and the authenticated player's board.
 - POST /api/games/{id}/claim — server-side Bingo validation and one-time prize credit.
 - POST /api/games/{id}/call — admin-only number call.
-- /admin — browser dashboard; sign in using ADMIN_API_TOKEN.
+- /admin — browser dashboard; sign in using EFONA_ADMIN_API_TOKEN.
 - GET/POST /api/cartela — legacy single-cartela endpoint; requires Telegram WebApp initData.
 - POST /deposit and POST /withdraw — require valid Telegram WebApp authentication. Requests are stored as pending.
-- GET /admin/transactions, POST /admin/approve/{id}, POST /admin/reject/{id} — require X-Admin-Token: ADMIN_API_TOKEN.
+- GET /admin/transactions, POST /admin/approve/{id}, POST /admin/reject/{id} — require X-Admin-Token: EFONA_ADMIN_API_TOKEN.
 
 ## Important: not ready for real-money/public launch
 
@@ -76,4 +76,4 @@ Do not credit real balances, pay prizes, or launch public cash games until these
     python -m pip install -r requirements.txt
     python -m compileall -q app.py bot.py database.py firebase_service.py models.py config.py bingo_service.py\n    python -m unittest discover -s tests -v
 
-For local use, set FIREBASE_CREDENTIALS_JSON, BOT_TOKEN, WEBAPP_URL, and ADMIN_API_TOKEN in environment variables. Do not paste secrets into source code or commit them to GitHub.
+For local use, set EFONA_FIREBASE_CREDENTIALS_JSON, EFONA_BOT_TOKEN, EFONA_WEBAPP_URL, and EFONA_ADMIN_API_TOKEN in environment variables. Do not paste secrets into source code or commit them to GitHub.
