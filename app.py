@@ -189,5 +189,17 @@ def leaderboard():
                      "balance": d.to_dict().get("balance", 0)} for d in docs])
 
 
+# Render's free web instance cannot host a separate free Background Worker.
+# Run the Telegram polling loop in a single daemon thread in this same service.
+if os.getenv("RUN_TELEGRAM_BOT", "").lower() == "true":
+    import threading
+
+    def _run_bot():
+        from bot import main as run_telegram_bot
+        run_telegram_bot()
+
+    threading.Thread(target=_run_bot, name="telegram-polling", daemon=True).start()
+
+
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=int(os.getenv("PORT", os.getenv("FLASK_PORT", 5000))))
