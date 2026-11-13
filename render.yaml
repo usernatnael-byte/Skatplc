@@ -5,7 +5,7 @@ services:
     plan: free
     buildCommand: pip install -r requirements.txt
     startCommand: gunicorn app:app --workers 1 --threads 4 --timeout 120
-    healthCheckPath: /
+    healthCheckPath: /healthz
     envVars:
       - key: EFONA_FLASK_SECRET
         generateValue: true
@@ -20,4 +20,6 @@ services:
       - key: EFONA_WEBAPP_URL
         sync: false
       - key: EFONA_RUN_TELEGRAM_BOT
+        value: "true"
+      - key: EFONA_RUN_GAME_ENGINE
         value: "true"
